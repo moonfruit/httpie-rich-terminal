@@ -645,6 +645,18 @@ def test_probe_size_degrades_when_ioctl_fails(monkeypatch):
     assert size.rows > 0
 
 
+def test_probe_size_degrades_without_ioctl_support(monkeypatch):
+    # Windows has no fcntl/termios; the module still imports and probe_size
+    # must return a usable default rather than raising NameError.
+    monkeypatch.setattr(terminal, "_HAS_IOCTL", False)
+
+    size = probe_size(fd=1)
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+    assert size.rows > 0
+
+
 def test_probe_size_degrades_when_stdout_is_none(monkeypatch):
     # pythonw and detached daemons leave sys.__stdout__ as None.
     monkeypatch.setattr(terminal.sys, "__stdout__", None)
@@ -691,10 +703,20 @@ Expected: FAIL，`ImportError: cannot import name 'TerminalSize'`
 在 `httpie_rich_terminal/terminal.py` 顶部的 import 区补上：
 
 ```python
-import fcntl
 import struct
 import sys
-import termios
+```
+
+以及紧随其后的条件导入。`fcntl` 与 `termios` 是 POSIX-only，Windows 上顶层导入会抛 `ImportError`，导致 HTTPie 在加载插件时 `warnings.warn` 并跳过——用户即使从不请求图片，每次执行 `http` 都会看到一条警告：
+
+```python
+try:
+    import fcntl
+    import termios
+
+    _HAS_IOCTL = True
+except ImportError:  # pragma: no cover - Windows has no fcntl/termios
+    _HAS_IOCTL = False
 ```
 
 在文件末尾追加：
@@ -733,6 +755,9 @@ def probe_size(fd: Optional[int] = None) -> TerminalSize:
     of both OSError and ValueError). The ioctl itself raises OSError EINVAL /
     ENOTTY whenever stdout is not a TTY.
     """
+    if not _HAS_IOCTL:
+        return _UNKNOWN_SIZE
+
     try:
         if fd is None:
             fd = sys.__stdout__.fileno()
