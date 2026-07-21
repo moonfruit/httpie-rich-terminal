@@ -180,8 +180,10 @@ OSC 序列格式：`ESC ] 1337 ; File = <args> : <base64> ST`
 
 1. `ioctl(TIOCGWINSZ)` 获取 `ws_col`、`ws_row`、`ws_xpixel`、`ws_ypixel`，计算单元格像素尺寸。
 2. 上限列数 = `min(HTTPIE_RICH_MAX_WIDTH 或终端列数, 终端列数)`；上限行数 = `min(HTTPIE_RICH_MAX_HEIGHT 或 max(1, 终端行数 // 2), 终端行数)`。两者均为整数，除法取整。换算为像素上限。
-3. `scale = min(1.0, 上限宽 / 图宽, 上限高 / 图高)`。`min` 中的 `1.0` 保证小图永不放大。
-4. `scale < 1` 时用 Pillow LANCZOS 缩放。
+3. `scale = min(上限宽 / 图宽, 上限高 / 图高)`，随后 `if scale >= 1.0: return None`——**这一行才是「小图永不放大」的执行处**：图片已经装得下时原样返回，不做任何缩放。
+
+   早期版本写作 `min(1.0, ...)` 并注释称那个 `1.0` 保证不放大。经变异测试证伪：单独删除该 `1.0` 不会让任何测试失败，因为后续的 `>= 1.0` 判断已经拦下所有装得下的图片。该冗余项已移除。
+4. `scale < 1` 时用 Pillow LANCZOS 缩放。**必须先做模式转换再缩放**：Pillow 对 `P`（调色板）和 `1` 模式会静默忽略 resample 参数并退回 NEAREST，导致 GIF 与调色板 PNG 缩小后出现明显锯齿。已实测：细横条纹图缩放后，先转换再缩放得到 45 种灰阶，反之只剩 2 色。
 
 `MAX_HEIGHT` 默认取终端行数的一半，理由是图片不应把整屏顶掉，需为响应头和后续 shell prompt 留出空间。
 
