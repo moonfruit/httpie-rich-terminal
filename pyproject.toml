@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "httpie-rich-terminal"
-version = "0.1.0"
+dynamic = ["version"]
 description = "在终端中内联显示 HTTPie 的图片响应，支持 iTerm2、Ghostty、kitty、WezTerm"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -43,6 +43,19 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["httpie_rich_terminal"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/httpie_rich_terminal",
+    "/tests",
+    "/scripts",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+]
+
+[tool.hatch.version]
+path = "httpie_rich_terminal/__init__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

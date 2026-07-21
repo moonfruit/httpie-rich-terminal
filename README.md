@@ -59,7 +59,7 @@ http https://httpbin.org/image/jpeg
 
 **图片不会被放大。** 小于终端可用区域的图片按原始尺寸显示。
 
-**格式转换是自动的。** WebP、BMP、TIFF、AVIF 等格式会被转成 PNG 后显示。GIF 动画在 iTerm2 和 WezTerm 中可以正常播放；在 kitty 和 Ghostty 中只显示第一帧，因为 kitty 图形协议的静态传输模式不支持动画。
+**格式转换是自动的。** WebP、BMP、TIFF、AVIF 等格式会被转成 PNG 后显示。GIF 动画在 iTerm2 和 WezTerm 中可以正常播放——即使图片超出终端可用区域也会原样透传、由终端自行缩小显示，因为缩放会把动画塌缩成单帧；在 kitty 和 Ghostty 中只显示第一帧，因为 kitty 图形协议的静态传输模式不支持动画。
 
 **管道输出时插件不参与。** `http ... > file.png` 或 `http ... | other-cmd` 时 HTTPie 走原始字节流，插件不会被调用，图片数据完整无损。
 

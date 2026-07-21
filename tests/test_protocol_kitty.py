@@ -86,3 +86,18 @@ def test_payload_of_exactly_one_chunk_boundary():
 
 def test_output_ends_with_a_newline_so_the_prompt_is_not_glued_to_the_image():
     assert PROTO.render(b"x", "PNG").endswith("\n")
+
+
+def test_middle_chunks_are_marked_as_continuations():
+    # 9000 bytes -> 12000 base64 chars -> 3 chunks, so there is a genuine
+    # middle. Emitting m=0 early would truncate the image on a real terminal
+    # while every other assertion in this file still passed.
+    data = b"\xcd" * 9000
+
+    out = PROTO.render(data, "PNG")
+    controls = [s.split(";", 1)[0] for s in out.rstrip("\n").split("\x1b\\") if s]
+
+    assert len(controls) == 3
+    assert controls[0].endswith("m=1")
+    assert controls[1] == "\x1b_Gm=1"
+    assert controls[2] == "\x1b_Gm=0"

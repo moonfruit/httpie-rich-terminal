@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - name: Test
+        run: |
+          uv sync
+          uv run ruff check .
+          uv run pytest -q
       - name: Build
         run: uv build
       - name: Publish to PyPI

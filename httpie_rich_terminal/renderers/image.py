@@ -82,27 +82,42 @@ def prepare_payload(
 ) -> tuple[bytes, str]:
     """Return the bytes to transmit and their format.
 
-    One rule: pass the original bytes through when no resize is needed and the
-    protocol accepts the format; otherwise re-encode as PNG. GIF animation
-    survives on iTerm2 and collapses to its first frame on kitty purely as a
-    consequence of that rule.
+    Pass the original bytes through when no resize is needed and the protocol
+    accepts the format. Multi-frame images are also passed through -- even
+    when oversized -- as long as the protocol accepts the format, since
+    resizing would collapse the animation to a single frame; the protocols
+    that accept GIF (iTerm2, WezTerm) shrink oversized images to the window
+    themselves. Everything else is re-encoded as PNG. GIF animation therefore
+    survives on iTerm2 regardless of size and collapses to its first frame on
+    kitty, which never accepts GIF in the first place.
     """
     with Image.open(io.BytesIO(body)) as image:
         source_format = (image.format or "").upper()
         target_size = plan_resize(image.size, term, config)
+        # Resizing collapses an animation to a single frame, so for multi-frame
+        # images the choice is animation or exact sizing, not both. Prefer
+        # animation: the protocols that accept GIF shrink oversized images to
+        # the window on their own (kitty never gets here -- it rejects GIF, so
+        # its frames still collapse into a still PNG below).
+        animated = getattr(image, "n_frames", 1) > 1
 
-        if target_size is None and protocol.accepts_format(source_format):
-            debug_log(config, f"passing {source_format} through unmodified")
+        if protocol.accepts_format(source_format) and (target_size is None or animated):
+            if animated and target_size is not None:
+                debug_log(config, f"passing oversized {source_format} through to keep animation")
+            else:
+                debug_log(config, f"passing {source_format} through unmodified")
             return body, source_format
+
+        # Convert before resizing: Pillow ignores the resample filter for P and
+        # 1 modes, silently falling back to NEAREST.
+        if image.mode not in ("RGB", "RGBA", "L"):
+            image = image.convert("RGBA")
 
         if target_size is not None:
             debug_log(config, f"resizing {image.size} -> {target_size}")
             image = image.resize(target_size, Image.LANCZOS)
         else:
             debug_log(config, f"re-encoding {source_format} as PNG")
-
-        if image.mode not in ("RGB", "RGBA", "L"):
-            image = image.convert("RGBA")
 
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")
@@ -116,7 +131,14 @@ def render_image(
     term: TerminalSize,
     config: Config,
 ) -> str:
-    """Render an image response, or a one-line summary when it cannot be shown."""
+    """Render an image response, or a one-line summary when it cannot be shown.
+
+    This function is not self-guarding: undecodable bytes, Pillow errors, and
+    the like are allowed to raise. `RichTerminalConverter.convert()` is the
+    layer that catches such failures and turns them into a summary line, so a
+    caller that invokes this directly (e.g. scripts/demo.py) must decide for
+    itself whether that guarantee is needed.
+    """
     if detection.protocol is None:
         reason = detection.skip_reason or "无法显示"
         debug_log(config, f"skipping image: {reason}")
