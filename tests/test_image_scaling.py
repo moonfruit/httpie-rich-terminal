@@ -47,6 +47,18 @@ def test_max_width_cannot_exceed_the_real_terminal_width():
     assert plan_resize((1280, 100), TERM, cfg) == (640, 50)
 
 
+def test_max_height_cannot_exceed_the_real_terminal_height():
+    cfg = load_config({"HTTPIE_RICH_MAX_HEIGHT": "999"})
+    # Still capped at 24 rows = 408 px, so an 816px-tall image halves.
+    assert plan_resize((100, 816), TERM, cfg) == (50, 408)
+
+
+def test_degenerate_image_dimensions_are_rejected():
+    assert plan_resize((0, 0), TERM, AUTO) is None
+    assert plan_resize((100, 0), TERM, AUTO) is None
+    assert plan_resize((-5, 10), TERM, AUTO) is None
+
+
 def test_returns_none_when_pixel_info_is_unavailable():
     unknown = TerminalSize(columns=80, rows=24, cell_width=0.0, cell_height=0.0)
     assert plan_resize((4000, 3000), unknown, AUTO) is None

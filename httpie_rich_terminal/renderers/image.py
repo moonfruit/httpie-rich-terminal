@@ -29,8 +29,8 @@ def plan_resize(
     if width <= 0 or height <= 0:
         return None
 
-    # The 1.0 term is what guarantees small images are never enlarged.
-    scale = min(1.0, max_pixel_width / width, max_pixel_height / height)
+    scale = min(max_pixel_width / width, max_pixel_height / height)
+    # Never enlarge: an image that already fits is passed through untouched.
     if scale >= 1.0:
         return None
 
