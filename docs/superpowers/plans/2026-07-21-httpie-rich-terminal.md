@@ -589,6 +589,7 @@ git commit -m "feat: add terminal detection with forced-protocol escape hatch"
 创建 `tests/test_terminal_size.py`：
 
 ```python
+import io
 import struct
 
 import pytest
@@ -642,6 +643,27 @@ def test_probe_size_degrades_when_ioctl_fails(monkeypatch):
     assert size.has_pixel_info is False
     assert size.columns > 0
     assert size.rows > 0
+
+
+def test_probe_size_degrades_when_stdout_is_none(monkeypatch):
+    # pythonw and detached daemons leave sys.__stdout__ as None.
+    monkeypatch.setattr(terminal.sys, "__stdout__", None)
+
+    size = probe_size()
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+
+
+def test_probe_size_degrades_when_stdout_has_no_fileno(monkeypatch):
+    # pytest's capsys and various wrappers replace stdout with a StringIO,
+    # whose fileno() raises io.UnsupportedOperation.
+    monkeypatch.setattr(terminal.sys, "__stdout__", io.StringIO())
+
+    size = probe_size()
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
 
 
 def test_probe_size_degrades_when_columns_are_zero(monkeypatch):
@@ -703,13 +725,17 @@ _UNKNOWN_SIZE = TerminalSize(
 def probe_size(fd: Optional[int] = None) -> TerminalSize:
     """Query the terminal geometry via TIOCGWINSZ.
 
-    Falls back to an 80x24 grid with unknown cell pixels when the ioctl fails
-    (non-tty: OSError EINVAL/ENOTTY) or when the terminal reports zeroes.
+    Falls back to an 80x24 grid with unknown cell pixels when the geometry
+    cannot be determined. Resolving the file descriptor is inside the try
+    because it fails in real deployments too: sys.__stdout__ is None under
+    pythonw and detached daemons (AttributeError), and is a StringIO under
+    pytest's capsys and various wrappers (io.UnsupportedOperation, a subclass
+    of both OSError and ValueError). The ioctl itself raises OSError EINVAL /
+    ENOTTY whenever stdout is not a TTY.
     """
-    if fd is None:
-        fd = sys.__stdout__.fileno()
-
     try:
+        if fd is None:
+            fd = sys.__stdout__.fileno()
         packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8)
         rows, columns, x_pixels, y_pixels = struct.unpack("HHHH", packed)
     except (OSError, ValueError, AttributeError):
