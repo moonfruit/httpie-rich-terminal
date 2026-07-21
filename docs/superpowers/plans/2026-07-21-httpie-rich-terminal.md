@@ -1242,7 +1242,7 @@ git commit -m "feat: add iTerm2 inline images protocol and protocol registry"
 
 **Interfaces:**
 - Consumes: `Config`、`TerminalSize`
-- Produces: `plan_resize(image_size: Tuple[int, int], term: TerminalSize, config: Config) -> Optional[Tuple[int, int]]`，返回 `None` 表示不缩放
+- Produces: `plan_resize(image_size: tuple[int, int], term: TerminalSize, config: Config) -> Optional[tuple[int, int]]`，返回 `None` 表示不缩放
 
 **核心规则**：「小图永不放大」由 `if scale >= 1.0: return None` 这一行执行——图片已经装得下时原样返回，不做任何缩放。
 
@@ -1346,15 +1346,15 @@ Expected: FAIL，`ModuleNotFoundError: No module named 'httpie_rich_terminal.ren
 ```python
 """Image rendering: scaling decisions and protocol hand-off."""
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from ..config import Config
 from ..terminal import TerminalSize
 
 
 def plan_resize(
-    image_size: Tuple[int, int], term: TerminalSize, config: Config
-) -> Optional[Tuple[int, int]]:
+    image_size: tuple[int, int], term: TerminalSize, config: Config
+) -> Optional[tuple[int, int]]:
     """Return the target pixel size, or None when the image should be left alone.
 
     Returns None when the terminal did not report pixel geometry: without cell
@@ -1414,7 +1414,7 @@ git commit -m "feat: add pixel-accurate scaling with a never-upscale guarantee"
   - `ImageInfo` 冻结数据类，字段：`mime: str`、`width: Optional[int]`、`height: Optional[int]`、`byte_size: int`
   - `describe(body: bytes, mime: str) -> ImageInfo`
   - `format_summary(info: ImageInfo, reason: str) -> str`
-  - `prepare_payload(body: bytes, protocol: ImageProtocol, term: TerminalSize, config: Config) -> Tuple[bytes, str]`
+  - `prepare_payload(body: bytes, protocol: ImageProtocol, term: TerminalSize, config: Config) -> tuple[bytes, str]`
   - `render_image(body: bytes, mime: str, detection: Detection, term: TerminalSize, config: Config) -> str`
 
 **编码规则**（唯一一条）：无需缩放且协议接受该格式 → 原样透传；否则 Pillow 转 PNG。
@@ -1585,7 +1585,7 @@ def test_render_image_returns_a_summary_when_the_terminal_is_unsupported(png_byt
         protocol=None, terminal="unknown", skip_reason="当前终端不支持内联图片显示"
     )
     out = render_image(png_bytes, "image/png", detection, TERM, AUTO)
-    assert out == "[image/png 100×50, %d B — 当前终端不支持内联图片显示]\n" % len(png_bytes)
+    assert out == f"[image/png 100×50, {len(png_bytes)} B — 当前终端不支持内联图片显示]\n"
 
 
 def test_render_image_returns_a_summary_inside_tmux(png_bytes):
@@ -1620,7 +1620,7 @@ Expected: FAIL，`ImportError: cannot import name 'ImageInfo'`
 
 import io
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 from PIL import Image
 
@@ -1669,7 +1669,7 @@ def format_summary(info: ImageInfo, reason: str) -> str:
 
 def prepare_payload(
     body: bytes, protocol: ImageProtocol, term: TerminalSize, config: Config
-) -> Tuple[bytes, str]:
+) -> tuple[bytes, str]:
     """Return the bytes to transmit and their format.
 
     One rule: pass the original bytes through when no resize is needed and the
@@ -1810,7 +1810,8 @@ FormatterPlugin entry point declaring group_name = 'colors' — see section 2.4
 of the design doc for why 'format' would break HTTPie's built-in formatters.
 """
 
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from .config import Config
 from .renderers.image import render_image
@@ -1818,7 +1819,7 @@ from .terminal import Detection, TerminalSize
 
 Renderer = Callable[[bytes, str, Detection, TerminalSize, Config], str]
 
-_RENDERERS: Dict[str, Renderer] = {
+_RENDERERS: dict[str, Renderer] = {
     "image/": render_image,
 }
 
@@ -1934,7 +1935,7 @@ def test_convert_returns_a_summary_on_an_unsupported_terminal(monkeypatch, png_b
     mime, body = RichTerminalConverter("image/png").convert(png_bytes)
 
     assert mime == OUTPUT_MIME
-    assert body == "[image/png 100×50, %d B — 当前终端不支持内联图片显示]\n" % len(png_bytes)
+    assert body == f"[image/png 100×50, {len(png_bytes)} B — 当前终端不支持内联图片显示]\n"
 
 
 def test_convert_never_raises_on_corrupt_input(monkeypatch):
@@ -2004,7 +2005,6 @@ returned MIME is one pygments cannot claim.
 """
 
 import traceback
-from typing import Tuple
 
 from httpie.plugins import ConverterPlugin
 
@@ -2034,7 +2034,7 @@ class RichTerminalConverter(ConverterPlugin):
             return False
         return supports_mime(mime)
 
-    def convert(self, body: bytes) -> Tuple[str, str]:
+    def convert(self, body: bytes) -> tuple[str, str]:
         config = load_config()
         # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
         data = bytes(body)
