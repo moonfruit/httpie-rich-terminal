@@ -4,16 +4,22 @@ This module only reads the environment and the tty; it knows nothing about
 image protocols beyond naming which one a terminal speaks.
 """
 
-import fcntl
 import os
 import struct
 import sys
-import termios
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Optional
 
 from .config import Config
+
+try:
+    import fcntl
+    import termios
+
+    _HAS_IOCTL = True
+except ImportError:  # pragma: no cover - Windows has no fcntl/termios
+    _HAS_IOCTL = False
 
 
 class ProtocolName:
@@ -113,6 +119,9 @@ def probe_size(fd: Optional[int] = None) -> TerminalSize:
     of both OSError and ValueError). The ioctl itself raises OSError EINVAL /
     ENOTTY whenever stdout is not a TTY.
     """
+    if not _HAS_IOCTL:
+        return _UNKNOWN_SIZE
+
     try:
         if fd is None:
             fd = sys.__stdout__.fileno()

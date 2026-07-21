@@ -66,6 +66,18 @@ def test_probe_size_degrades_when_columns_are_zero(monkeypatch):
     assert size.has_pixel_info is False
 
 
+def test_probe_size_degrades_without_ioctl_support(monkeypatch):
+    # Windows has no fcntl/termios; the module still imports and probe_size
+    # must return a usable default rather than raising NameError.
+    monkeypatch.setattr(terminal, "_HAS_IOCTL", False)
+
+    size = probe_size(fd=1)
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+    assert size.rows > 0
+
+
 def test_probe_size_degrades_when_stdout_is_none(monkeypatch):
     # pythonw and detached daemons leave sys.__stdout__ as None.
     monkeypatch.setattr(terminal.sys, "__stdout__", None)
