@@ -124,7 +124,7 @@ httpie 检测到 body 含 \0
 | `HTTPIE_RICH_PROTOCOL` 已设置且非 `auto` | 强制 | 指定值 |
 | `TMUX` 存在 | 降级摘要 | — |
 | `TERM=xterm-kitty` 或 `KITTY_PID` 存在 | kitty | kitty |
-| `TERM_PROGRAM=ghostty` 或 `GHOSTTY_BIN_DIR` 存在 | Ghostty | kitty |
+| `TERM_PROGRAM=ghostty` 或 `GHOSTTY_RESOURCES_DIR` 存在 | Ghostty | kitty |
 | `TERM_PROGRAM=iTerm.app` 或 `LC_TERMINAL=iTerm2` | iTerm2 | iterm2 |
 | `TERM_PROGRAM=WezTerm` 或 `WEZTERM_PANE` 存在 | WezTerm | iterm2 |
 | 其他 | 未知 | 降级摘要 |
@@ -132,6 +132,8 @@ httpie 检测到 body 含 \0
 注意 `HTTPIE_RICH_PROTOCOL` 的优先级**高于 `TMUX` 检测**。这是有意的：它是逃生舱，用户显式指定协议时应当尊重该选择，即便身处 tmux（例如用户已开启 `allow-passthrough` 并愿意自担风险）。
 
 `LC_TERMINAL` 一条使得 ssh 进远程主机时仍能识别 iTerm2（iTerm2 会透传该变量）。
+
+**`TERM` 不可靠**，不能作为 Ghostty 的判据。已实测：Ghostty 运行在 cmux 等宿主中时 `TERM=xterm-256color` 而非 `xterm-ghostty`，此时只有 `TERM_PROGRAM=ghostty` 和 `GHOSTTY_RESOURCES_DIR` 成立。kitty 一行保留 `TERM=xterm-kitty` 判据，但同样以 `KITTY_PID` 作为并列条件兜底。
 
 **不做运行时 tty 查询**。运行时查询需要将终端切换到 raw mode 并等待响应，而 HTTPie 此时正在写输出流，风险不值当。误判时的逃生舱是 `HTTPIE_RICH_PROTOCOL`。
 
@@ -157,7 +159,7 @@ APC 序列格式：`ESC _ G <control data> ; <payload> ESC \`
 \x1b_Gm=0;\x1b\\
 ```
 
-尺寸控制用 `c`（列数）/ `r`（行数）。`f=100` 时不需要 `s`/`v`，终端从 PNG 头读取像素尺寸。
+**不使用** `c`/`r` 尺寸参数，理由见第 7 节。`f=100` 时也不需要 `s`/`v`，终端从 PNG 头读取像素尺寸。
 
 ### 6.2 iTerm2 inline images protocol
 
@@ -165,7 +167,9 @@ OSC 序列格式：`ESC ] 1337 ; File = <args> : <base64> ST`
 
 使用 `ST`（`ESC \`）而非 `BEL` 作为终结符，避免响铃。
 
-参数：`inline=1`（必须显式指定，否则是下载而非内联）、`size=<字节数>`（用于进度显示）、`width=<N>` / `height=<N>`（单位为字符单元格）、`preserveAspectRatio=1`。
+参数：`inline=1`（必须显式指定，否则是下载而非内联）、`size=<字节数>`（用于进度显示）、`preserveAspectRatio=1`。
+
+**不使用** `width` / `height` 参数，理由见第 7 节。iTerm2 在缺省尺寸参数时会将超出窗口宽度的图片自动缩放适配，行为正合需要。
 
 ## 7. 缩放规则
 
@@ -176,20 +180,36 @@ OSC 序列格式：`ESC ] 1337 ; File = <args> : <base64> ST`
 
 `MAX_HEIGHT` 默认取终端行数的一半，理由是图片不应把整屏顶掉，需为响应头和后续 shell prompt 留出空间。
 
-**降级分支**：若 `ws_xpixel` 或 `ws_ypixel` 为 0（部分终端不填充该字段），无法换算像素，则不做 Pillow 缩放，改为传递协议自带的单元格参数（iTerm2 `width=N`、kitty `c=N`）让终端自行缩放。此路径在 `HTTPIE_RICH_DEBUG=1` 时记录日志。
+**协议层不接收尺寸参数**。缩放完全在 Pillow 层以像素为单位完成，图片被缩到正好的像素尺寸后，终端按原始像素显示即为期望结果。因此 kitty 的 `c`/`r` 与 iTerm2 的 `width`/`height` 一律不传。
+
+这一决定的关键理由：这两组参数的语义是「强制占据 N 个单元格」，会把小图**放大**到该区域，直接违反第 3 条的「小图永不放大」。
+
+**降级分支**：若 `ioctl` 失败（非 TTY 时抛 `OSError: [Errno 25] Inappropriate ioctl for device`，已实测），或 `ws_xpixel` / `ws_ypixel` 为 0（部分终端不填充该字段），则无法换算像素，此时**不做任何缩放**，按图片原始像素输出。
+
+该降级路径的已知后果，需写入 README：iTerm2 会自动将超宽图片缩放适配窗口，表现正常；kitty 与 Ghostty 则会裁切超出终端宽度的部分。`HTTPIE_RICH_DEBUG=1` 时记录走入此分支的日志。用户可通过 `HTTPIE_RICH_MAX_WIDTH` 手动干预——但注意该变量在此分支下同样无法生效，因为像素换算所需的单元格尺寸未知；此分支下唯一的补救是终端本身上报正确的 `TIOCGWINSZ` 像素字段。
 
 ## 8. 编码策略
 
-避免无谓的重编码：
+避免无谓的重编码。规则只有一条：
 
-| 情况 | 处理 |
+> **无需缩放，且当前协议接受该图片格式 → 原始字节透传；否则用 Pillow 转 PNG。**
+
+各协议接受的格式由 `ImageProtocol.accepts_format()` 声明：
+
+- kitty：仅 `PNG`（`f=100` 只吃 PNG）
+- iTerm2：`PNG`、`JPEG`、`GIF`
+
+上述规则自然导出以下行为，无需任何特判分支：
+
+| 情况 | 结果 |
 |---|---|
-| 原格式 PNG 且无需缩放 | 原始字节透传 |
-| 原格式 JPEG 且无需缩放，协议为 iterm2 | 原始字节透传 |
-| 原格式 JPEG 且无需缩放，协议为 kitty | 转 PNG（kitty `f=100` 只吃 PNG） |
-| GIF 动画，协议为 iterm2 | 原始字节透传，动图可正常播放 |
-| GIF 动画，协议为 kitty | 取首帧转 PNG |
-| 其他格式（WebP/BMP/TIFF/AVIF 等）或需要缩放 | Pillow 转 PNG |
+| PNG 且无需缩放 | 透传 |
+| JPEG 且无需缩放，iTerm2 | 透传 |
+| JPEG 且无需缩放，kitty | 转 PNG |
+| GIF 动画，iTerm2 | 透传，动图可正常播放 |
+| GIF 动画，kitty | 转 PNG，Pillow 默认取首帧 |
+| WebP/BMP/TIFF/AVIF 等 | 转 PNG |
+| 任何格式但需要缩放 | 转 PNG |
 
 ## 9. 配置
 
@@ -198,8 +218,8 @@ OSC 序列格式：`ESC ] 1337 ; File = <args> : <base64> ST`
 | 变量 | 默认值 | 作用 |
 |---|---|---|
 | `HTTPIE_RICH_DISABLE` | `0` | 设为 `1` 时 `supports()` 直接返回 `False`，插件完全隐形 |
-| `HTTPIE_RICH_MAX_WIDTH` | 终端列数 | 图片最大占用列数 |
-| `HTTPIE_RICH_MAX_HEIGHT` | `max(1, 终端行数 // 2)` | 图片最大占用行数 |
+| `HTTPIE_RICH_MAX_WIDTH` | 终端列数 | 图片最大占用列数。第 7 节的降级分支下无效 |
+| `HTTPIE_RICH_MAX_HEIGHT` | `max(1, 终端行数 // 2)` | 图片最大占用行数。第 7 节的降级分支下无效 |
 | `HTTPIE_RICH_PROTOCOL` | `auto` | 取值 `kitty` / `iterm2` / `auto` |
 | `HTTPIE_RICH_DEBUG` | `0` | 将检测结果、协议选择、缩放决策打印到 stderr |
 
