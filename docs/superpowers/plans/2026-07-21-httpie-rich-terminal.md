@@ -193,9 +193,11 @@ Expected: `All checks passed!`
 - [ ] **Step 7: Commit**
 
 ```bash
-git add pyproject.toml httpie_rich_terminal/ tests/ .github/ uv.lock
+git add pyproject.toml httpie_rich_terminal/ tests/ .github/
 git commit -m "feat: scaffold package with hatchling, pytest and CI matrix"
 ```
+
+**不要提交 `uv.lock`**，把它加入 `.gitignore`。这是一个库而非应用：依赖以范围声明（`httpie>=3.2`、`Pillow>=9.0`），CI 应当每次重新解析，以便上游破坏尽早暴露。此外，本机全局 uv 配置可能把 index 指向区域镜像，提交的 lock 会把该镜像固化进一个本该可移植的文件。
 
 ---
 
