@@ -1179,13 +1179,13 @@ class ITerm2Protocol(ImageProtocol):
 ```python
 """Terminal image protocol implementations."""
 
-from typing import Dict
-
 from .base import ImageProtocol
 from .iterm2 import ITerm2Protocol
 from .kitty import KittyProtocol
 
-_PROTOCOLS: Dict[str, ImageProtocol] = {
+# dict[...] rather than typing.Dict: ruff's UP rules reject the latter, and
+# PEP 585 subscripting is available from 3.9.
+_PROTOCOLS: dict[str, ImageProtocol] = {
     KittyProtocol.name: KittyProtocol(),
     ITerm2Protocol.name: ITerm2Protocol(),
 }
