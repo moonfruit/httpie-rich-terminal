@@ -78,6 +78,41 @@ def test_gif_becomes_png_on_kitty(gif_bytes):
     assert Image.open(io.BytesIO(data)).format == "PNG"
 
 
+def test_cmyk_jpeg_is_converted_to_a_writable_mode_for_kitty(cmyk_jpeg_bytes):
+    # PNG cannot encode CMYK at all: without the mode conversion Pillow raises
+    # OSError("cannot write mode CMYK as PNG") and the whole render fails.
+    data, image_format = prepare_payload(cmyk_jpeg_bytes, KITTY, TERM, AUTO)
+
+    assert image_format == "PNG"
+    converted = Image.open(io.BytesIO(data))
+    assert converted.format == "PNG"
+    assert converted.mode in ("RGB", "RGBA")
+
+
+def test_cmyk_jpeg_passes_through_on_iterm2(cmyk_jpeg_bytes):
+    # iTerm2 decodes JPEG itself, so no conversion is needed and none happens.
+    data, image_format = prepare_payload(cmyk_jpeg_bytes, ITERM2, TERM, AUTO)
+
+    assert data is cmyk_jpeg_bytes
+    assert image_format == "JPEG"
+
+
+def test_animated_gif_keeps_every_frame_on_iterm2(animated_gif_bytes):
+    data, image_format = prepare_payload(animated_gif_bytes, ITERM2, TERM, AUTO)
+
+    assert data is animated_gif_bytes
+    assert image_format == "GIF"
+    assert Image.open(io.BytesIO(data)).n_frames == 3
+
+
+def test_animated_gif_collapses_to_one_frame_on_kitty(animated_gif_bytes):
+    # kitty's f=100 transfer is a still PNG, so animation cannot survive.
+    data, image_format = prepare_payload(animated_gif_bytes, KITTY, TERM, AUTO)
+
+    assert image_format == "PNG"
+    assert getattr(Image.open(io.BytesIO(data)), "n_frames", 1) == 1
+
+
 def test_bmp_is_converted_for_both_protocols(bmp_bytes):
     for protocol in (KITTY, ITERM2):
         data, image_format = prepare_payload(bmp_bytes, protocol, TERM, AUTO)
