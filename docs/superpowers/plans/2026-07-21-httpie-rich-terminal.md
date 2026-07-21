@@ -1244,7 +1244,11 @@ git commit -m "feat: add iTerm2 inline images protocol and protocol registry"
 - Consumes: `Config`、`TerminalSize`
 - Produces: `plan_resize(image_size: Tuple[int, int], term: TerminalSize, config: Config) -> Optional[Tuple[int, int]]`，返回 `None` 表示不缩放
 
-**核心规则**：`scale = min(1.0, 上限宽 / 图宽, 上限高 / 图高)`。`min` 中的 `1.0` 是「小图永不放大」的实现。`term.has_pixel_info` 为假时直接返回 `None`。
+**核心规则**：「小图永不放大」由 `if scale >= 1.0: return None` 这一行执行——图片已经装得下时原样返回，不做任何缩放。
+
+注意 `scale = min(1.0, ...)` 中的 `1.0` **不参与**该规则：无论 scale 被钳到 1.0 还是保持大于 1.0，后面的 `>= 1.0` 判断都会返回 `None`。经变异测试确认，单独删除该 `1.0` 不会让任何测试失败。保留它仅作为「scale 值域为 (0, 1]」的意图表达。
+
+`term.has_pixel_info` 为假时直接返回 `None`。
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -1371,8 +1375,9 @@ def plan_resize(
     if width <= 0 or height <= 0:
         return None
 
-    # The 1.0 term is what guarantees small images are never enlarged.
     scale = min(1.0, max_pixel_width / width, max_pixel_height / height)
+    # Never enlarge: an image that already fits is passed through untouched.
+    # This check, not the 1.0 above, is what enforces the rule.
     if scale >= 1.0:
         return None
 
