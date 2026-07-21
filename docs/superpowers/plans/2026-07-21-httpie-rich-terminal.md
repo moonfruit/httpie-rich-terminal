@@ -1429,7 +1429,7 @@ git commit -m "feat: add pixel-accurate scaling with a never-upscale guarantee"
 import io
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def _encode(image: Image.Image, image_format: str) -> bytes:
@@ -1463,6 +1463,29 @@ def bmp_bytes():
 @pytest.fixture
 def gif_bytes():
     return _encode(Image.new("P", (100, 50), 3), "GIF")
+
+
+@pytest.fixture
+def cmyk_jpeg_bytes():
+    """A CMYK JPEG — PNG cannot encode this mode, so it must be converted."""
+    return _encode(Image.new("CMYK", (100, 50), (0, 255, 255, 0)), "JPEG")
+
+
+@pytest.fixture
+def animated_gif_bytes():
+    """A genuinely 3-frame GIF, for verifying animation survives pass-through."""
+    frames = []
+    for offset, colour in enumerate(("red", "green", "blue")):
+        frame = Image.new("RGB", (60, 40), "black")
+        ImageDraw.Draw(frame).rectangle(
+            [offset * 15, 0, offset * 15 + 14, 39], fill=colour
+        )
+        frames.append(frame.convert("P", palette=Image.ADAPTIVE))
+    buffer = io.BytesIO()
+    frames[0].save(
+        buffer, format="GIF", save_all=True, append_images=frames[1:], duration=200
+    )
+    return buffer.getvalue()
 ```
 
 - [ ] **Step 2: 写失败的测试**
