@@ -16,7 +16,15 @@ ITERM2_SEQUENCE = "\x1b]1337;File=inline=1;preserveAspectRatio=1;size=4:aGVsbA==
 
 @pytest.fixture
 def formatting():
-    """The full pretty chain: Headers, JSON, XML and Color formatters."""
+    """The full pretty chain: Headers, JSON, XML and Color formatters.
+
+    These kwargs reproduce what HTTPie itself passes when --pretty=all is in
+    effect: PRETTY_MAP maps 'all' to exactly ["format", "colors"], and those
+    two group names are what select the built-in formatters (see httpie's
+    cli/constants.py and output/processing.py). env.colors = 256 is required
+    or ColorFormatter disables itself and drops out of the chain, which would
+    make this test weaker than the real pipeline.
+    """
     env = Environment()
     env.colors = 256
     return Formatting(

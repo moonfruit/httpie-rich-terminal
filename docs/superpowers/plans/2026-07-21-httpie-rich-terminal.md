@@ -2251,7 +2251,7 @@ def test_end_to_end_convert_output_survives_the_chain(formatting, monkeypatch, p
 uv run pytest tests/test_httpie_pipeline.py -v
 ```
 
-Expected: 7 passed（4 个测试函数，其中两个各带 2 组 parametrize）
+Expected: 7 passed（5 个测试函数，其中两个各带 2 组 parametrize：1+2+2+1+1）
 
 若 `test_svg_mime_would_corrupt_the_payload` 失败，说明 HTTPie 行为已变化，需重新核对设计文档 2.3 节，而不是删掉这个测试。
 
