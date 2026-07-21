@@ -6,8 +6,9 @@ only passed to formatters), so environment variables are the only knob.
 
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Optional
 
 ENV_PREFIX = "HTTPIE_RICH_"
 
