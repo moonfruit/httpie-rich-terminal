@@ -1,3 +1,4 @@
+import io
 import struct
 
 import pytest
@@ -63,3 +64,24 @@ def test_probe_size_degrades_when_columns_are_zero(monkeypatch):
     assert size.columns > 0
     assert size.rows > 0
     assert size.has_pixel_info is False
+
+
+def test_probe_size_degrades_when_stdout_is_none(monkeypatch):
+    # pythonw and detached daemons leave sys.__stdout__ as None.
+    monkeypatch.setattr(terminal.sys, "__stdout__", None)
+
+    size = probe_size()
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+
+
+def test_probe_size_degrades_when_stdout_has_no_fileno(monkeypatch):
+    # pytest's capsys and various wrappers replace stdout with a StringIO,
+    # whose fileno() raises io.UnsupportedOperation.
+    monkeypatch.setattr(terminal.sys, "__stdout__", io.StringIO())
+
+    size = probe_size()
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
