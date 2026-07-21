@@ -93,6 +93,34 @@ def test_convert_returns_a_summary_when_no_renderer_matches(monkeypatch, png_byt
     assert "无法渲染" in body
 
 
+def test_summary_does_not_leak_volatile_object_reprs(monkeypatch):
+    # Pillow's decode error embeds "<_io.BytesIO object at 0x...>", whose heap
+    # address changes every run and means nothing to the reader.
+    monkeypatch.setenv("TERM", "xterm-kitty")
+
+    _, body = RichTerminalConverter("image/png").convert(b"garbage")
+
+    assert "0x" not in body
+    assert "object at" not in body
+    assert "渲染失败" in body
+
+
+def test_convert_survives_a_failure_during_setup(monkeypatch, png_bytes):
+    # load_config() runs before anything else; if even that raises, convert()
+    # must still return rather than propagate.
+    from httpie_rich_terminal import plugin
+
+    def boom():
+        raise RuntimeError("config exploded")
+
+    monkeypatch.setattr(plugin, "load_config", boom)
+
+    mime, body = RichTerminalConverter("image/png").convert(png_bytes)
+
+    assert mime == OUTPUT_MIME
+    assert "config exploded" in body
+
+
 def test_debug_mode_reports_the_traceback(monkeypatch, capsys):
     monkeypatch.setenv("HTTPIE_RICH_DEBUG", "1")
     monkeypatch.setenv("TERM", "xterm-kitty")

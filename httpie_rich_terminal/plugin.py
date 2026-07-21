@@ -6,6 +6,7 @@ plain string, which flows through the formatter chain untouched as long as the
 returned MIME is one pygments cannot claim.
 """
 
+import re
 import traceback
 
 from httpie.plugins import ConverterPlugin
@@ -18,6 +19,16 @@ from .terminal import detect, probe_size
 #: Returning image/* here would let downstream formatters rewrite the payload;
 #: image/svg+xml is provably corrupted by XMLFormatter. Keep this private type.
 OUTPUT_MIME = "application/x-httpie-rich-terminal"
+
+#: Pillow embeds the repr of the stream it failed on, e.g.
+#: "cannot identify image file <_io.BytesIO object at 0x105...>". The heap
+#: address is noise in a user-facing line and differs on every run.
+_OBJECT_REPR = re.compile(r"\s*<[\w.]+ object at 0x[0-9a-fA-F]+>")
+
+
+def _clean_error(exc: Exception) -> str:
+    """Render an exception for the summary line, without volatile object reprs."""
+    return _OBJECT_REPR.sub("", str(exc)).strip() or type(exc).__name__
 
 
 class RichTerminalConverter(ConverterPlugin):
@@ -37,10 +48,17 @@ class RichTerminalConverter(ConverterPlugin):
         return supports_mime(mime)
 
     def convert(self, body: bytes) -> tuple[str, str]:
-        config = load_config()
-        # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
-        data = bytes(body)
+        # Everything lives inside the try, including the setup steps: this
+        # method is the last line of defence and must never raise toward
+        # HTTPie. Both seeds are chosen so the except branch still works if
+        # setup is what failed -- describe(b"") yields a dimensionless
+        # ImageInfo rather than raising.
+        config = None
+        data = b""
         try:
+            config = load_config()
+            # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
+            data = bytes(body)
             renderer = find_renderer(self.mime)
             if renderer is None:
                 return OUTPUT_MIME, self._summary(data, "无法渲染该类型")
@@ -57,9 +75,9 @@ class RichTerminalConverter(ConverterPlugin):
             )
             return OUTPUT_MIME, renderer(data, self.mime, detection, size, config)
         except Exception as exc:
-            if config.debug:
+            if config is not None and config.debug:
                 debug_log(config, "render failed:\n" + traceback.format_exc())
-            return OUTPUT_MIME, self._summary(data, f"渲染失败：{exc}")
+            return OUTPUT_MIME, self._summary(data, f"渲染失败：{_clean_error(exc)}")
 
     def _summary(self, data: bytes, reason: str) -> str:
         return format_summary(describe(data, self.mime), reason)
