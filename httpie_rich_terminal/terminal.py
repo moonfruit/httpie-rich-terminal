@@ -4,7 +4,11 @@ This module only reads the environment and the tty; it knows nothing about
 image protocols beyond naming which one a terminal speaks.
 """
 
+import fcntl
 import os
+import struct
+import sys
+import termios
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Optional
@@ -74,3 +78,50 @@ def detect(config: Config, env: Optional[Mapping[str, str]] = None) -> Detection
         return Detection(protocol=ProtocolName.ITERM2, terminal="wezterm", skip_reason=None)
 
     return Detection(protocol=None, terminal="unknown", skip_reason=SKIP_UNSUPPORTED)
+
+
+DEFAULT_COLUMNS = 80
+DEFAULT_ROWS = 24
+
+
+@dataclass(frozen=True)
+class TerminalSize:
+    columns: int
+    rows: int
+    cell_width: float
+    cell_height: float
+
+    @property
+    def has_pixel_info(self) -> bool:
+        """Whether pixel-accurate scaling is possible."""
+        return self.cell_width > 0 and self.cell_height > 0
+
+
+_UNKNOWN_SIZE = TerminalSize(
+    columns=DEFAULT_COLUMNS, rows=DEFAULT_ROWS, cell_width=0.0, cell_height=0.0
+)
+
+
+def probe_size(fd: Optional[int] = None) -> TerminalSize:
+    """Query the terminal geometry via TIOCGWINSZ.
+
+    Falls back to an 80x24 grid with unknown cell pixels when the ioctl fails
+    (non-tty: OSError EINVAL/ENOTTY) or when the terminal reports zeroes.
+    """
+    if fd is None:
+        fd = sys.__stdout__.fileno()
+
+    try:
+        packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8)
+        rows, columns, x_pixels, y_pixels = struct.unpack("HHHH", packed)
+    except (OSError, ValueError, AttributeError):
+        return _UNKNOWN_SIZE
+
+    if columns <= 0 or rows <= 0:
+        return _UNKNOWN_SIZE
+
+    cell_width = x_pixels / columns if x_pixels > 0 else 0.0
+    cell_height = y_pixels / rows if y_pixels > 0 else 0.0
+    return TerminalSize(
+        columns=columns, rows=rows, cell_width=cell_width, cell_height=cell_height
+    )
