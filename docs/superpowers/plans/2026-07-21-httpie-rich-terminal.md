@@ -985,7 +985,6 @@ terminal's OK/error replies, which would otherwise pollute stdout.
 """
 
 import base64
-from typing import List
 
 from .base import ImageProtocol
 
@@ -1015,7 +1014,9 @@ class KittyProtocol(ImageProtocol):
         if len(chunks[-1]) == KITTY_CHUNK_SIZE:
             chunks.append("")
 
-        sequences: List[str] = []
+        # list[str] rather than typing.List[str]: ruff's UP rules reject the
+        # latter, and PEP 585 subscripting is available from 3.9.
+        sequences: list[str] = []
         for index, chunk in enumerate(chunks):
             is_last = index == len(chunks) - 1
             more = "0" if is_last else "1"
