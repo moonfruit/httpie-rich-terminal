@@ -1997,6 +1997,34 @@ def test_convert_returns_a_summary_when_no_renderer_matches(monkeypatch, png_byt
     assert "无法渲染" in body
 
 
+def test_summary_does_not_leak_volatile_object_reprs(monkeypatch):
+    # Pillow's decode error embeds "<_io.BytesIO object at 0x...>", whose heap
+    # address changes every run and means nothing to the reader.
+    monkeypatch.setenv("TERM", "xterm-kitty")
+
+    _, body = RichTerminalConverter("image/png").convert(b"garbage")
+
+    assert "0x" not in body
+    assert "object at" not in body
+    assert "渲染失败" in body
+
+
+def test_convert_survives_a_failure_during_setup(monkeypatch, png_bytes):
+    # load_config() runs before anything else; if even that raises, convert()
+    # must still return rather than propagate.
+    from httpie_rich_terminal import plugin
+
+    def boom():
+        raise RuntimeError("config exploded")
+
+    monkeypatch.setattr(plugin, "load_config", boom)
+
+    mime, body = RichTerminalConverter("image/png").convert(png_bytes)
+
+    assert mime == OUTPUT_MIME
+    assert "config exploded" in body
+
+
 def test_debug_mode_reports_the_traceback(monkeypatch, capsys):
     monkeypatch.setenv("HTTPIE_RICH_DEBUG", "1")
     monkeypatch.setenv("TERM", "xterm-kitty")
@@ -2027,6 +2055,7 @@ plain string, which flows through the formatter chain untouched as long as the
 returned MIME is one pygments cannot claim.
 """
 
+import re
 import traceback
 
 from httpie.plugins import ConverterPlugin
@@ -2039,6 +2068,16 @@ from .terminal import detect, probe_size
 #: Returning image/* here would let downstream formatters rewrite the payload;
 #: image/svg+xml is provably corrupted by XMLFormatter. Keep this private type.
 OUTPUT_MIME = "application/x-httpie-rich-terminal"
+
+#: Pillow embeds the repr of the stream it failed on, e.g.
+#: "cannot identify image file <_io.BytesIO object at 0x105...>". The heap
+#: address is noise in a user-facing line and differs on every run.
+_OBJECT_REPR = re.compile(r"\s*<[\w.]+ object at 0x[0-9a-fA-F]+>")
+
+
+def _clean_error(exc: Exception) -> str:
+    """Render an exception for the summary line, without volatile object reprs."""
+    return _OBJECT_REPR.sub("", str(exc)).strip() or type(exc).__name__
 
 
 class RichTerminalConverter(ConverterPlugin):
@@ -2058,10 +2097,17 @@ class RichTerminalConverter(ConverterPlugin):
         return supports_mime(mime)
 
     def convert(self, body: bytes) -> tuple[str, str]:
-        config = load_config()
-        # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
-        data = bytes(body)
+        # Everything lives inside the try, including the setup steps: this
+        # method is the last line of defence and must never raise toward
+        # HTTPie. Both seeds are chosen so the except branch still works if
+        # setup is what failed -- describe(b"") yields a dimensionless
+        # ImageInfo rather than raising.
+        config = None
+        data = b""
         try:
+            config = load_config()
+            # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
+            data = bytes(body)
             renderer = find_renderer(self.mime)
             if renderer is None:
                 return OUTPUT_MIME, self._summary(data, "无法渲染该类型")
@@ -2078,9 +2124,9 @@ class RichTerminalConverter(ConverterPlugin):
             )
             return OUTPUT_MIME, renderer(data, self.mime, detection, size, config)
         except Exception as exc:
-            if config.debug:
+            if config is not None and config.debug:
                 debug_log(config, "render failed:\n" + traceback.format_exc())
-            return OUTPUT_MIME, self._summary(data, f"渲染失败：{exc}")
+            return OUTPUT_MIME, self._summary(data, f"渲染失败：{_clean_error(exc)}")
 
     def _summary(self, data: bytes, reason: str) -> str:
         return format_summary(describe(data, self.mime), reason)
