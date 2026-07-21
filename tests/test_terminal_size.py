@@ -69,7 +69,16 @@ def test_probe_size_degrades_when_columns_are_zero(monkeypatch):
 def test_probe_size_degrades_without_ioctl_support(monkeypatch):
     # Windows has no fcntl/termios; the module still imports and probe_size
     # must return a usable default rather than raising NameError.
+    #
+    # The names must be deleted too, not just the flag flipped. With them
+    # still bound, removing the guard leaves this test green: fd=1 is not a
+    # tty under pytest, so fcntl.ioctl raises OSError, which the existing
+    # except clause swallows into the very same _UNKNOWN_SIZE this asserts.
+    # Deleting them makes a missing guard surface as NameError, which is not
+    # in the except clause and therefore fails the test.
     monkeypatch.setattr(terminal, "_HAS_IOCTL", False)
+    monkeypatch.delattr(terminal, "fcntl", raising=False)
+    monkeypatch.delattr(terminal, "termios", raising=False)
 
     size = probe_size(fd=1)
 
