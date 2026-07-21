@@ -16,6 +16,13 @@ def test_mime_matching_is_case_insensitive():
     assert supports_mime("IMAGE/PNG") is True
 
 
+def test_prefix_must_match_at_the_start_not_anywhere():
+    # Guards startswith against a regression to substring containment, which
+    # every other case in this file would pass unchanged.
+    assert supports_mime("x-image/png") is False
+    assert supports_mime("application/vnd.image/png") is False
+
+
 def test_find_renderer_returns_the_image_renderer():
     assert find_renderer("image/png") is render_image
 
