@@ -29,8 +29,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/moon/httpie-rich-terminal"
-Issues = "https://github.com/moon/httpie-rich-terminal/issues"
+Homepage = "https://github.com/moonfruit/httpie-rich-terminal"
+Repository = "https://github.com/moonfruit/httpie-rich-terminal"
+Issues = "https://github.com/moonfruit/httpie-rich-terminal/issues"
+Changelog = "https://github.com/moonfruit/httpie-rich-terminal/releases"
 
 [project.entry-points."httpie.plugins.converter.v1"]
 httpie_rich_terminal = "httpie_rich_terminal.plugin:RichTerminalConverter"
