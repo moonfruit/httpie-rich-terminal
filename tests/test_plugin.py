@@ -54,7 +54,9 @@ def test_convert_returns_a_summary_on_an_unsupported_terminal(monkeypatch, png_b
     mime, body = RichTerminalConverter("image/png").convert(png_bytes)
 
     assert mime == OUTPUT_MIME
-    assert body == f"[image/png 100×50, {len(png_bytes)} B — 当前终端不支持内联图片显示]\n"
+    assert body == (
+        f"[image/png 100×50, {len(png_bytes)} B — this terminal does not support inline images]\n"
+    )
 
 
 def test_convert_never_raises_on_corrupt_input(monkeypatch):
@@ -64,7 +66,7 @@ def test_convert_never_raises_on_corrupt_input(monkeypatch):
     mime, body = RichTerminalConverter("image/png").convert(b"definitely not an image")
 
     assert mime == OUTPUT_MIME
-    assert "渲染失败" in body
+    assert "render failed" in body
 
 
 def test_convert_never_raises_when_a_renderer_explodes(monkeypatch, png_bytes):
@@ -79,7 +81,7 @@ def test_convert_never_raises_when_a_renderer_explodes(monkeypatch, png_bytes):
     mime, body = RichTerminalConverter("image/png").convert(png_bytes)
 
     assert mime == OUTPUT_MIME
-    assert "渲染失败" in body
+    assert "render failed" in body
     assert "kaboom" in body
 
 
@@ -90,7 +92,7 @@ def test_convert_returns_a_summary_when_no_renderer_matches(monkeypatch, png_byt
     mime, body = RichTerminalConverter("image/png").convert(png_bytes)
 
     assert mime == OUTPUT_MIME
-    assert "无法渲染" in body
+    assert "no renderer" in body
 
 
 def test_summary_does_not_leak_volatile_object_reprs(monkeypatch):
@@ -102,7 +104,7 @@ def test_summary_does_not_leak_volatile_object_reprs(monkeypatch):
 
     assert "0x" not in body
     assert "object at" not in body
-    assert "渲染失败" in body
+    assert "render failed" in body
 
 
 def test_convert_survives_a_failure_during_setup(monkeypatch, png_bytes):

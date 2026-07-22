@@ -1,77 +1,82 @@
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+[![PyPI](https://img.shields.io/pypi/v/httpie-rich-terminal)](https://pypi.org/project/httpie-rich-terminal/)
+[![CI](https://github.com/moonfruit/httpie-rich-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/moonfruit/httpie-rich-terminal/actions/workflows/ci.yml)
+
 # httpie-rich-terminal
 
-在终端中直接显示 HTTPie 的图片响应。
+Display HTTPie's image responses directly in your terminal.
 
 ```bash
 http https://httpbin.org/image/png
 ```
 
-## 支持的终端
+## Supported terminals
 
-| 终端 | 协议 | 状态 |
+| Terminal | Protocol | Status |
 |---|---|---|
-| kitty | kitty graphics | 支持 |
-| Ghostty | kitty graphics | 支持 |
-| iTerm2 | OSC 1337 inline images | 支持 |
-| WezTerm | OSC 1337 inline images | 支持 |
-| tmux 内 | — | 不显示图片，打印摘要行 |
-| 其他终端 | — | 不显示图片，打印摘要行 |
+| kitty | kitty graphics | Supported |
+| Ghostty | kitty graphics | Supported |
+| iTerm2 | OSC 1337 inline images | Supported |
+| WezTerm | OSC 1337 inline images | Supported |
+| Inside tmux | — | No image, prints a summary line |
+| Other terminals | — | No image, prints a summary line |
 
-## 安装
+## Install
 
 ```bash
 httpie plugins install httpie-rich-terminal
 ```
 
-若 HTTPie 是用 pip 安装的，也可以：
+If HTTPie was installed with pip, this also works:
 
 ```bash
 pip install httpie-rich-terminal
 ```
 
-## 使用
+## Usage
 
-装好即生效，无需额外参数：
+Works as soon as it is installed, no extra flags needed:
 
 ```bash
 http https://httpbin.org/image/jpeg
 ```
 
-图片显示不出来时，插件会打印一行摘要说明原因：
+When the image cannot be shown, the plugin prints a one-line summary explaining why:
 
 ```
-[image/png 1920×1080, 245 KB — 当前终端不支持内联图片显示]
+[image/png 1920×1080, 245 KB — this terminal does not support inline images]
 ```
 
-## 配置
+## Configuration
 
-全部通过环境变量控制。
+Everything is controlled through environment variables.
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |---|---|---|
-| `HTTPIE_RICH_DISABLE` | `0` | 设为 `1` 完全禁用插件，恢复 HTTPie 原生的二进制提示 |
-| `HTTPIE_RICH_MAX_WIDTH` | 终端列数 | 图片最多占用的列数 |
-| `HTTPIE_RICH_MAX_HEIGHT` | 终端行数的一半 | 图片最多占用的行数 |
-| `HTTPIE_RICH_PROTOCOL` | `auto` | 强制指定协议：`kitty` 或 `iterm2` |
-| `HTTPIE_RICH_DEBUG` | `0` | 设为 `1` 将检测与缩放决策打印到 stderr |
+| `HTTPIE_RICH_DISABLE` | `0` | Set to `1` to fully disable the plugin and restore HTTPie's native binary notice |
+| `HTTPIE_RICH_MAX_WIDTH` | terminal columns | Maximum columns the image may occupy |
+| `HTTPIE_RICH_MAX_HEIGHT` | half the terminal rows | Maximum rows the image may occupy |
+| `HTTPIE_RICH_PROTOCOL` | `auto` | Force a protocol: `kitty` or `iterm2` |
+| `HTTPIE_RICH_DEBUG` | `0` | Set to `1` to print detection and scaling decisions to stderr |
 
-## 行为说明
+## Behavior
 
-**图片不会被放大。** 小于终端可用区域的图片按原始尺寸显示。
+**Small images are never enlarged.** An image that already fits the terminal's available area is displayed at its original size.
 
-**格式转换是自动的。** WebP、BMP、TIFF、AVIF 等格式会被转成 PNG 后显示。GIF 动画在 iTerm2 和 WezTerm 中可以正常播放——即使图片超出终端可用区域也会原样透传、由终端自行缩小显示，因为缩放会把动画塌缩成单帧；在 kitty 和 Ghostty 中只显示第一帧，因为 kitty 图形协议的静态传输模式不支持动画。
+**Format conversion is automatic.** WebP, BMP, TIFF, AVIF and similar formats are converted to PNG before being displayed. GIF animation plays correctly on iTerm2 and WezTerm — even an oversized image is passed through untouched and shrunk to fit by the terminal itself, since resizing would collapse the animation to a single frame. On kitty and Ghostty only the first frame is shown, because the kitty graphics protocol's still-image transfer mode does not support animation.
 
-**管道输出时插件不参与。** `http ... > file.png` 或 `http ... | other-cmd` 时 HTTPie 走原始字节流，插件不会被调用，图片数据完整无损。
+**The plugin does not participate when output is piped.** With `http ... > file.png` or `http ... | other-cmd`, HTTPie streams the original bytes and the plugin is never invoked — the image data comes through complete and untouched.
 
-## 已知限制
+## Known limitations
 
-**部分终端不上报像素尺寸。** 插件通过 `ioctl(TIOCGWINSZ)` 获取终端的像素尺寸来计算缩放。少数终端会把该字段填 0，此时插件无法换算列数与像素的关系，会跳过缩放按原始尺寸输出——iTerm2 和 WezTerm 会自动把超宽图片缩放适配窗口，kitty 和 Ghostty 则会裁切超出部分。`HTTPIE_RICH_MAX_WIDTH` 在这种情况下同样无法生效。用 `HTTPIE_RICH_DEBUG=1` 可以确认是否走到了这条路径。
+**Some terminals do not report pixel dimensions.** The plugin queries the terminal's pixel size via `ioctl(TIOCGWINSZ)` to compute scaling. A few terminals fill that field with zero, in which case the plugin cannot convert columns to pixels and skips scaling entirely, outputting the image at its original size — iTerm2 and WezTerm still automatically fit oversized images to the window, while kitty and Ghostty crop what doesn't fit. `HTTPIE_RICH_MAX_WIDTH` likewise has no effect in this situation. Use `HTTPIE_RICH_DEBUG=1` to confirm whether this path was taken.
 
-**tmux 中不显示图片。** tmux 需要 `allow-passthrough` 配合各协议的特殊封装，各版本行为差异较大，当前版本选择直接跳过并打印摘要。若你已开启 `allow-passthrough` 并愿意自行承担风险，可以用 `HTTPIE_RICH_PROTOCOL` 强制指定协议绕过该检测。
+**Images are not shown inside tmux.** tmux requires `allow-passthrough` along with protocol-specific wrapping, and behavior varies significantly across versions, so the current version simply skips rendering and prints a summary instead. If you have already enabled `allow-passthrough` and are willing to take the risk, you can use `HTTPIE_RICH_PROTOCOL` to force a protocol and bypass this check.
 
-**只在 pretty 输出模式下生效。** 这是 HTTPie 插件机制的限制：`--pretty=none`、`--download` 以及非 TTY 输出都不会走 converter 路径。
+**Only active in pretty output mode.** This is a limitation of HTTPie's plugin mechanism: `--pretty=none`, `--download`, and non-TTY output never go through the converter path.
 
-## 开发
+## Development
 
 ```bash
 uv sync
@@ -79,12 +84,12 @@ uv run pytest
 uv run ruff check .
 ```
 
-在真实终端里手动验证渲染效果：
+To manually verify rendering in a real terminal:
 
 ```bash
 uv run python scripts/demo.py
 ```
 
-## 许可
+## License
 
 MIT

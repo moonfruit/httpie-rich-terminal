@@ -33,7 +33,7 @@ def _clean_error(exc: Exception) -> str:
 
 class RichTerminalConverter(ConverterPlugin):
     name = "rich-terminal"
-    description = "在终端中内联显示图片响应"
+    description = "Display image responses inline in the terminal"
 
     @classmethod
     def supports(cls, mime: str) -> bool:
@@ -61,7 +61,7 @@ class RichTerminalConverter(ConverterPlugin):
             data = bytes(body)
             renderer = find_renderer(self.mime)
             if renderer is None:
-                return OUTPUT_MIME, self._summary(data, "无法渲染该类型")
+                return OUTPUT_MIME, self._summary(data, "no renderer for this type")
 
             detection = detect(config)
             debug_log(
@@ -77,7 +77,7 @@ class RichTerminalConverter(ConverterPlugin):
         except Exception as exc:
             if config is not None and config.debug:
                 debug_log(config, "render failed:\n" + traceback.format_exc())
-            return OUTPUT_MIME, self._summary(data, f"渲染失败：{_clean_error(exc)}")
+            return OUTPUT_MIME, self._summary(data, f"render failed: {_clean_error(exc)}")
 
     def _summary(self, data: bytes, reason: str) -> str:
         return format_summary(describe(data, self.mime), reason)

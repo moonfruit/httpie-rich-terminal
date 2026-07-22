@@ -140,7 +140,7 @@ def render_image(
     itself whether that guarantee is needed.
     """
     if detection.protocol is None:
-        reason = detection.skip_reason or "无法显示"
+        reason = detection.skip_reason or "cannot display"
         debug_log(config, f"skipping image: {reason}")
         return format_summary(describe(body, mime), reason)
 

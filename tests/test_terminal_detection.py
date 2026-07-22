@@ -50,14 +50,14 @@ def test_unknown_terminal_is_skipped_with_reason():
     d = detect(AUTO, {"TERM": "xterm-256color"})
     assert d.protocol is None
     assert d.terminal == "unknown"
-    assert d.skip_reason == "当前终端不支持内联图片显示"
+    assert d.skip_reason == "this terminal does not support inline images"
 
 
 def test_tmux_is_skipped_even_on_a_capable_terminal():
     d = detect(AUTO, {"TMUX": "/tmp/tmux-501/default,123,0", "TERM": "xterm-kitty"})
     assert d.protocol is None
     assert d.terminal == "tmux"
-    assert d.skip_reason == "tmux 环境，图片已跳过"
+    assert d.skip_reason == "skipped inside tmux"
 
 
 def test_forced_protocol_wins_over_tmux():

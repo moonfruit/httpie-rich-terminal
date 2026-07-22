@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "httpie-rich-terminal"
 dynamic = ["version"]
-description = "在终端中内联显示 HTTPie 的图片响应，支持 iTerm2、Ghostty、kitty、WezTerm"
+description = "Display HTTPie image responses inline in iTerm2, Ghostty, kitty and WezTerm"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"

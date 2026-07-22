@@ -27,8 +27,8 @@ class ProtocolName:
     ITERM2 = "iterm2"
 
 
-SKIP_TMUX = "tmux 环境，图片已跳过"
-SKIP_UNSUPPORTED = "当前终端不支持内联图片显示"
+SKIP_TMUX = "skipped inside tmux"
+SKIP_UNSUPPORTED = "this terminal does not support inline images"
 
 
 @dataclass(frozen=True)

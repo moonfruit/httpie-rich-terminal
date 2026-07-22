@@ -38,14 +38,14 @@ def test_describe_survives_undecodable_bytes():
 
 def test_format_summary_includes_dimensions_and_reason():
     info = ImageInfo(mime="image/png", width=1920, height=1080, byte_size=250880)
-    assert format_summary(info, "当前终端不支持内联图片显示") == (
-        "[image/png 1920×1080, 245 KB — 当前终端不支持内联图片显示]\n"
+    assert format_summary(info, "this terminal does not support inline images") == (
+        "[image/png 1920×1080, 245 KB — this terminal does not support inline images]\n"
     )
 
 
 def test_format_summary_omits_dimensions_when_unknown():
     info = ImageInfo(mime="image/png", width=None, height=None, byte_size=2048)
-    assert format_summary(info, "渲染失败") == "[image/png 2 KB — 渲染失败]\n"
+    assert format_summary(info, "render failed") == "[image/png 2 KB — render failed]\n"
 
 
 def test_small_png_passes_through_untouched_on_kitty(png_bytes):
@@ -145,16 +145,20 @@ def test_render_image_emits_an_iterm2_sequence(png_bytes):
 
 def test_render_image_returns_a_summary_when_the_terminal_is_unsupported(png_bytes):
     detection = Detection(
-        protocol=None, terminal="unknown", skip_reason="当前终端不支持内联图片显示"
+        protocol=None,
+        terminal="unknown",
+        skip_reason="this terminal does not support inline images",
     )
     out = render_image(png_bytes, "image/png", detection, TERM, AUTO)
-    assert out == f"[image/png 100×50, {len(png_bytes)} B — 当前终端不支持内联图片显示]\n"
+    assert out == (
+        f"[image/png 100×50, {len(png_bytes)} B — this terminal does not support inline images]\n"
+    )
 
 
 def test_render_image_returns_a_summary_inside_tmux(png_bytes):
-    detection = Detection(protocol=None, terminal="tmux", skip_reason="tmux 环境，图片已跳过")
+    detection = Detection(protocol=None, terminal="tmux", skip_reason="skipped inside tmux")
     out = render_image(png_bytes, "image/png", detection, TERM, AUTO)
-    assert "tmux 环境，图片已跳过" in out
+    assert "skipped inside tmux" in out
 
 
 @pytest.mark.parametrize(
