@@ -83,13 +83,18 @@ httpie_rich_terminal/
 │   ├── kitty.py        # APC _G，f=100，4096 分块，q=2
 │   └── iterm2.py       # OSC 1337 File=inline=1，ST 终结
 └── renderers/
-    ├── base.py         # Renderer 接口
     └── image.py        # Pillow 解码/缩放/编码 → 调 protocol
 ```
 
+`renderers/` 没有单独的 `base.py`：`Renderer` 契约就是 `registry.py` 里的
+`Callable[[bytes, str, Detection, TerminalSize, Config], str]` 类型别名，无需
+额外文件。
+
 三层单向依赖，每层可独立测试：
 
-- `terminal.py`：只读环境变量和 ioctl。不知道协议的存在。
+- `terminal.py`：只读环境变量和 ioctl。它定义了 `ProtocolName`（`kitty`/
+  `iterm2` 两个字符串常量）并在 `detect()` 的返回值中使用，但不 import
+  `protocols/` 下任何模块——耦合仅限于字符串名字的层面。
 - `protocols/`：只做「PNG 字节 + 目标尺寸 → 转义序列字符串」。不依赖 Pillow，不依赖 httpie。
 - `renderers/image.py`：只做图像处理决策，通过 `ImageProtocol` 接口调用协议层。
 - `plugin.py`：唯一依赖 httpie 的文件，约 40 行。
@@ -175,8 +180,10 @@ OSC 序列格式：`ESC ] 1337 ; File = <args> : <base64> ST`
 
 1. `ioctl(TIOCGWINSZ)` 获取 `ws_col`、`ws_row`、`ws_xpixel`、`ws_ypixel`，计算单元格像素尺寸。
 2. 上限列数 = `min(HTTPIE_RICH_MAX_WIDTH 或终端列数, 终端列数)`；上限行数 = `min(HTTPIE_RICH_MAX_HEIGHT 或 max(1, 终端行数 // 2), 终端行数)`。两者均为整数，除法取整。换算为像素上限。
-3. `scale = min(1.0, 上限宽 / 图宽, 上限高 / 图高)`。`min` 中的 `1.0` 保证小图永不放大。
-4. `scale < 1` 时用 Pillow LANCZOS 缩放。
+3. `scale = min(上限宽 / 图宽, 上限高 / 图高)`，随后 `if scale >= 1.0: return None`——**这一行才是「小图永不放大」的执行处**：图片已经装得下时原样返回，不做任何缩放。
+
+   早期版本写作 `min(1.0, ...)` 并注释称那个 `1.0` 保证不放大。经变异测试证伪：单独删除该 `1.0` 不会让任何测试失败，因为后续的 `>= 1.0` 判断已经拦下所有装得下的图片。该冗余项已移除。
+4. `scale < 1` 时用 Pillow LANCZOS 缩放。**必须先做模式转换再缩放**：Pillow 对 `P`（调色板）和 `1` 模式会静默忽略 resample 参数并退回 NEAREST，导致 GIF 与调色板 PNG 缩小后出现明显锯齿。已实测：细横条纹图缩放后，先转换再缩放得到 45 种灰阶，反之只剩 2 色。
 
 `MAX_HEIGHT` 默认取终端行数的一半，理由是图片不应把整屏顶掉，需为响应头和后续 shell prompt 留出空间。
 
@@ -190,26 +197,33 @@ OSC 序列格式：`ESC ] 1337 ; File = <args> : <base64> ST`
 
 ## 8. 编码策略
 
-避免无谓的重编码。规则只有一条：
+避免无谓的重编码。规则有两条，第二条只为多帧图片而存在：
 
-> **无需缩放，且当前协议接受该图片格式 → 原始字节透传；否则用 Pillow 转 PNG。**
+> **无需缩放，且当前协议接受该图片格式 → 原始字节透传。**
+> **需要缩放，但图片是多帧（动画）且协议接受该格式 → 仍然透传，放弃精确缩放以保留动画。**
+> **其余情况 → 用 Pillow 转 PNG（转 PNG 前若需缩放则先转码再缩放，见第 7 节）。**
+
+多帧动画一旦缩放就会被 Pillow 塌缩成单帧，因此「缩放」和「保留动画」二选一。
+选择保留动画是因为接受 GIF 的协议（iTerm2、WezTerm）本身就会把超出窗口的图片
+缩小以适配显示，效果并不比手动缩放差。
 
 各协议接受的格式由 `ImageProtocol.accepts_format()` 声明：
 
-- kitty：仅 `PNG`（`f=100` 只吃 PNG）
+- kitty：仅 `PNG`（`f=100` 只吃 PNG，因此 GIF 在 kitty 上永远走转码分支）
 - iTerm2：`PNG`、`JPEG`、`GIF`
 
-上述规则自然导出以下行为，无需任何特判分支：
+上述规则自然导出以下行为：
 
 | 情况 | 结果 |
 |---|---|
 | PNG 且无需缩放 | 透传 |
 | JPEG 且无需缩放，iTerm2 | 透传 |
 | JPEG 且无需缩放，kitty | 转 PNG |
-| GIF 动画，iTerm2 | 透传，动图可正常播放 |
-| GIF 动画，kitty | 转 PNG，Pillow 默认取首帧 |
+| GIF 动画，无需缩放，iTerm2/WezTerm | 透传，动图可正常播放 |
+| GIF 动画，超出终端预算，iTerm2/WezTerm | 仍然透传，动图可正常播放，由终端自行缩小显示 |
+| GIF 动画，kitty | 转 PNG，Pillow 默认取首帧（kitty 不接受 GIF，与是否缩放无关） |
 | WebP/BMP/TIFF/AVIF 等 | 转 PNG |
-| 任何格式但需要缩放 | 转 PNG |
+| 单帧图片且需要缩放 | 转 PNG |
 
 ## 9. 配置
 

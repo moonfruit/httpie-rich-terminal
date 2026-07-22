@@ -193,9 +193,11 @@ Expected: `All checks passed!`
 - [ ] **Step 7: Commit**
 
 ```bash
-git add pyproject.toml httpie_rich_terminal/ tests/ .github/ uv.lock
+git add pyproject.toml httpie_rich_terminal/ tests/ .github/
 git commit -m "feat: scaffold package with hatchling, pytest and CI matrix"
 ```
+
+**不要提交 `uv.lock`**，把它加入 `.gitignore`。这是一个库而非应用：依赖以范围声明（`httpie>=3.2`、`Pillow>=9.0`），CI 应当每次重新解析，以便上游破坏尽早暴露。此外，本机全局 uv 配置可能把 index 指向区域镜像，提交的 lock 会把该镜像固化进一个本该可移植的文件。
 
 ---
 
@@ -286,8 +288,9 @@ only passed to formatters), so environment variables are the only knob.
 
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Optional
 
 ENV_PREFIX = "HTTPIE_RICH_"
 
@@ -478,8 +481,9 @@ image protocols beyond naming which one a terminal speaks.
 """
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Optional
 
 from .config import Config
 
@@ -585,6 +589,7 @@ git commit -m "feat: add terminal detection with forced-protocol escape hatch"
 创建 `tests/test_terminal_size.py`：
 
 ```python
+import io
 import struct
 
 import pytest
@@ -640,6 +645,48 @@ def test_probe_size_degrades_when_ioctl_fails(monkeypatch):
     assert size.rows > 0
 
 
+def test_probe_size_degrades_without_ioctl_support(monkeypatch):
+    # Windows has no fcntl/termios; the module still imports and probe_size
+    # must return a usable default rather than raising NameError.
+    #
+    # The names must be deleted too, not just the flag flipped. With them
+    # still bound, removing the guard leaves this test green: fd=1 is not a
+    # tty under pytest, so fcntl.ioctl raises OSError, which the existing
+    # except clause swallows into the very same _UNKNOWN_SIZE this asserts.
+    # Deleting them makes a missing guard surface as NameError, which is not
+    # in the except clause and therefore fails the test.
+    monkeypatch.setattr(terminal, "_HAS_IOCTL", False)
+    monkeypatch.delattr(terminal, "fcntl", raising=False)
+    monkeypatch.delattr(terminal, "termios", raising=False)
+
+    size = probe_size(fd=1)
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+    assert size.rows > 0
+
+
+def test_probe_size_degrades_when_stdout_is_none(monkeypatch):
+    # pythonw and detached daemons leave sys.__stdout__ as None.
+    monkeypatch.setattr(terminal.sys, "__stdout__", None)
+
+    size = probe_size()
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+
+
+def test_probe_size_degrades_when_stdout_has_no_fileno(monkeypatch):
+    # pytest's capsys and various wrappers replace stdout with a StringIO,
+    # whose fileno() raises io.UnsupportedOperation.
+    monkeypatch.setattr(terminal.sys, "__stdout__", io.StringIO())
+
+    size = probe_size()
+
+    assert size.has_pixel_info is False
+    assert size.columns > 0
+
+
 def test_probe_size_degrades_when_columns_are_zero(monkeypatch):
     # A zero column count would make max-width maths collapse; treat as unknown.
     packed = struct.pack("HHHH", 0, 0, 0, 0)
@@ -665,10 +712,20 @@ Expected: FAIL，`ImportError: cannot import name 'TerminalSize'`
 在 `httpie_rich_terminal/terminal.py` 顶部的 import 区补上：
 
 ```python
-import fcntl
 import struct
 import sys
-import termios
+```
+
+以及紧随其后的条件导入。`fcntl` 与 `termios` 是 POSIX-only，Windows 上顶层导入会抛 `ImportError`，导致 HTTPie 在加载插件时 `warnings.warn` 并跳过——用户即使从不请求图片，每次执行 `http` 都会看到一条警告：
+
+```python
+try:
+    import fcntl
+    import termios
+
+    _HAS_IOCTL = True
+except ImportError:  # pragma: no cover - Windows has no fcntl/termios
+    _HAS_IOCTL = False
 ```
 
 在文件末尾追加：
@@ -699,13 +756,20 @@ _UNKNOWN_SIZE = TerminalSize(
 def probe_size(fd: Optional[int] = None) -> TerminalSize:
     """Query the terminal geometry via TIOCGWINSZ.
 
-    Falls back to an 80x24 grid with unknown cell pixels when the ioctl fails
-    (non-tty: OSError EINVAL/ENOTTY) or when the terminal reports zeroes.
+    Falls back to an 80x24 grid with unknown cell pixels when the geometry
+    cannot be determined. Resolving the file descriptor is inside the try
+    because it fails in real deployments too: sys.__stdout__ is None under
+    pythonw and detached daemons (AttributeError), and is a StringIO under
+    pytest's capsys and various wrappers (io.UnsupportedOperation, a subclass
+    of both OSError and ValueError). The ioctl itself raises OSError EINVAL /
+    ENOTTY whenever stdout is not a TTY.
     """
-    if fd is None:
-        fd = sys.__stdout__.fileno()
+    if not _HAS_IOCTL:
+        return _UNKNOWN_SIZE
 
     try:
+        if fd is None:
+            fd = sys.__stdout__.fileno()
         packed = fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8)
         rows, columns, x_pixels, y_pixels = struct.unpack("HHHH", packed)
     except (OSError, ValueError, AttributeError):
@@ -921,7 +985,6 @@ terminal's OK/error replies, which would otherwise pollute stdout.
 """
 
 import base64
-from typing import List
 
 from .base import ImageProtocol
 
@@ -951,7 +1014,9 @@ class KittyProtocol(ImageProtocol):
         if len(chunks[-1]) == KITTY_CHUNK_SIZE:
             chunks.append("")
 
-        sequences: List[str] = []
+        # list[str] rather than typing.List[str]: ruff's UP rules reject the
+        # latter, and PEP 585 subscripting is available from 3.9.
+        sequences: list[str] = []
         for index, chunk in enumerate(chunks):
             is_last = index == len(chunks) - 1
             more = "0" if is_last else "1"
@@ -1114,13 +1179,13 @@ class ITerm2Protocol(ImageProtocol):
 ```python
 """Terminal image protocol implementations."""
 
-from typing import Dict
-
 from .base import ImageProtocol
 from .iterm2 import ITerm2Protocol
 from .kitty import KittyProtocol
 
-_PROTOCOLS: Dict[str, ImageProtocol] = {
+# dict[...] rather than typing.Dict: ruff's UP rules reject the latter, and
+# PEP 585 subscripting is available from 3.9.
+_PROTOCOLS: dict[str, ImageProtocol] = {
     KittyProtocol.name: KittyProtocol(),
     ITerm2Protocol.name: ITerm2Protocol(),
 }
@@ -1177,9 +1242,13 @@ git commit -m "feat: add iTerm2 inline images protocol and protocol registry"
 
 **Interfaces:**
 - Consumes: `Config`、`TerminalSize`
-- Produces: `plan_resize(image_size: Tuple[int, int], term: TerminalSize, config: Config) -> Optional[Tuple[int, int]]`，返回 `None` 表示不缩放
+- Produces: `plan_resize(image_size: tuple[int, int], term: TerminalSize, config: Config) -> Optional[tuple[int, int]]`，返回 `None` 表示不缩放
 
-**核心规则**：`scale = min(1.0, 上限宽 / 图宽, 上限高 / 图高)`。`min` 中的 `1.0` 是「小图永不放大」的实现。`term.has_pixel_info` 为假时直接返回 `None`。
+**核心规则**：「小图永不放大」由 `if scale >= 1.0: return None` 这一行执行——图片已经装得下时原样返回，不做任何缩放。
+
+注意 `scale = min(1.0, ...)` 中的 `1.0` **不参与**该规则：无论 scale 被钳到 1.0 还是保持大于 1.0，后面的 `>= 1.0` 判断都会返回 `None`。经变异测试确认，单独删除该 `1.0` 不会让任何测试失败。保留它仅作为「scale 值域为 (0, 1]」的意图表达。
+
+`term.has_pixel_info` 为假时直接返回 `None`。
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -1277,15 +1346,15 @@ Expected: FAIL，`ModuleNotFoundError: No module named 'httpie_rich_terminal.ren
 ```python
 """Image rendering: scaling decisions and protocol hand-off."""
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from ..config import Config
 from ..terminal import TerminalSize
 
 
 def plan_resize(
-    image_size: Tuple[int, int], term: TerminalSize, config: Config
-) -> Optional[Tuple[int, int]]:
+    image_size: tuple[int, int], term: TerminalSize, config: Config
+) -> Optional[tuple[int, int]]:
     """Return the target pixel size, or None when the image should be left alone.
 
     Returns None when the terminal did not report pixel geometry: without cell
@@ -1306,8 +1375,9 @@ def plan_resize(
     if width <= 0 or height <= 0:
         return None
 
-    # The 1.0 term is what guarantees small images are never enlarged.
     scale = min(1.0, max_pixel_width / width, max_pixel_height / height)
+    # Never enlarge: an image that already fits is passed through untouched.
+    # This check, not the 1.0 above, is what enforces the rule.
     if scale >= 1.0:
         return None
 
@@ -1344,7 +1414,7 @@ git commit -m "feat: add pixel-accurate scaling with a never-upscale guarantee"
   - `ImageInfo` 冻结数据类，字段：`mime: str`、`width: Optional[int]`、`height: Optional[int]`、`byte_size: int`
   - `describe(body: bytes, mime: str) -> ImageInfo`
   - `format_summary(info: ImageInfo, reason: str) -> str`
-  - `prepare_payload(body: bytes, protocol: ImageProtocol, term: TerminalSize, config: Config) -> Tuple[bytes, str]`
+  - `prepare_payload(body: bytes, protocol: ImageProtocol, term: TerminalSize, config: Config) -> tuple[bytes, str]`
   - `render_image(body: bytes, mime: str, detection: Detection, term: TerminalSize, config: Config) -> str`
 
 **编码规则**（唯一一条）：无需缩放且协议接受该格式 → 原样透传；否则 Pillow 转 PNG。
@@ -1359,7 +1429,7 @@ git commit -m "feat: add pixel-accurate scaling with a never-upscale guarantee"
 import io
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 
 def _encode(image: Image.Image, image_format: str) -> bytes:
@@ -1393,6 +1463,29 @@ def bmp_bytes():
 @pytest.fixture
 def gif_bytes():
     return _encode(Image.new("P", (100, 50), 3), "GIF")
+
+
+@pytest.fixture
+def cmyk_jpeg_bytes():
+    """A CMYK JPEG — PNG cannot encode this mode, so it must be converted."""
+    return _encode(Image.new("CMYK", (100, 50), (0, 255, 255, 0)), "JPEG")
+
+
+@pytest.fixture
+def animated_gif_bytes():
+    """A genuinely 3-frame GIF, for verifying animation survives pass-through."""
+    frames = []
+    for offset, colour in enumerate(("red", "green", "blue")):
+        frame = Image.new("RGB", (60, 40), "black")
+        ImageDraw.Draw(frame).rectangle(
+            [offset * 15, 0, offset * 15 + 14, 39], fill=colour
+        )
+        frames.append(frame.convert("P", palette=Image.ADAPTIVE))
+    buffer = io.BytesIO()
+    frames[0].save(
+        buffer, format="GIF", save_all=True, append_images=frames[1:], duration=200
+    )
+    return buffer.getvalue()
 ```
 
 - [ ] **Step 2: 写失败的测试**
@@ -1515,7 +1608,7 @@ def test_render_image_returns_a_summary_when_the_terminal_is_unsupported(png_byt
         protocol=None, terminal="unknown", skip_reason="当前终端不支持内联图片显示"
     )
     out = render_image(png_bytes, "image/png", detection, TERM, AUTO)
-    assert out == "[image/png 100×50, %d B — 当前终端不支持内联图片显示]\n" % len(png_bytes)
+    assert out == f"[image/png 100×50, {len(png_bytes)} B — 当前终端不支持内联图片显示]\n"
 
 
 def test_render_image_returns_a_summary_inside_tmux(png_bytes):
@@ -1550,7 +1643,7 @@ Expected: FAIL，`ImportError: cannot import name 'ImageInfo'`
 
 import io
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 
 from PIL import Image
 
@@ -1599,7 +1692,7 @@ def format_summary(info: ImageInfo, reason: str) -> str:
 
 def prepare_payload(
     body: bytes, protocol: ImageProtocol, term: TerminalSize, config: Config
-) -> Tuple[bytes, str]:
+) -> tuple[bytes, str]:
     """Return the bytes to transmit and their format.
 
     One rule: pass the original bytes through when no resize is needed and the
@@ -1740,7 +1833,8 @@ FormatterPlugin entry point declaring group_name = 'colors' — see section 2.4
 of the design doc for why 'format' would break HTTPie's built-in formatters.
 """
 
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Optional
 
 from .config import Config
 from .renderers.image import render_image
@@ -1748,7 +1842,7 @@ from .terminal import Detection, TerminalSize
 
 Renderer = Callable[[bytes, str, Detection, TerminalSize, Config], str]
 
-_RENDERERS: Dict[str, Renderer] = {
+_RENDERERS: dict[str, Renderer] = {
     "image/": render_image,
 }
 
@@ -1864,7 +1958,7 @@ def test_convert_returns_a_summary_on_an_unsupported_terminal(monkeypatch, png_b
     mime, body = RichTerminalConverter("image/png").convert(png_bytes)
 
     assert mime == OUTPUT_MIME
-    assert body == "[image/png 100×50, %d B — 当前终端不支持内联图片显示]\n" % len(png_bytes)
+    assert body == f"[image/png 100×50, {len(png_bytes)} B — 当前终端不支持内联图片显示]\n"
 
 
 def test_convert_never_raises_on_corrupt_input(monkeypatch):
@@ -1903,6 +1997,34 @@ def test_convert_returns_a_summary_when_no_renderer_matches(monkeypatch, png_byt
     assert "无法渲染" in body
 
 
+def test_summary_does_not_leak_volatile_object_reprs(monkeypatch):
+    # Pillow's decode error embeds "<_io.BytesIO object at 0x...>", whose heap
+    # address changes every run and means nothing to the reader.
+    monkeypatch.setenv("TERM", "xterm-kitty")
+
+    _, body = RichTerminalConverter("image/png").convert(b"garbage")
+
+    assert "0x" not in body
+    assert "object at" not in body
+    assert "渲染失败" in body
+
+
+def test_convert_survives_a_failure_during_setup(monkeypatch, png_bytes):
+    # load_config() runs before anything else; if even that raises, convert()
+    # must still return rather than propagate.
+    from httpie_rich_terminal import plugin
+
+    def boom():
+        raise RuntimeError("config exploded")
+
+    monkeypatch.setattr(plugin, "load_config", boom)
+
+    mime, body = RichTerminalConverter("image/png").convert(png_bytes)
+
+    assert mime == OUTPUT_MIME
+    assert "config exploded" in body
+
+
 def test_debug_mode_reports_the_traceback(monkeypatch, capsys):
     monkeypatch.setenv("HTTPIE_RICH_DEBUG", "1")
     monkeypatch.setenv("TERM", "xterm-kitty")
@@ -1933,8 +2055,8 @@ plain string, which flows through the formatter chain untouched as long as the
 returned MIME is one pygments cannot claim.
 """
 
+import re
 import traceback
-from typing import Tuple
 
 from httpie.plugins import ConverterPlugin
 
@@ -1946,6 +2068,16 @@ from .terminal import detect, probe_size
 #: Returning image/* here would let downstream formatters rewrite the payload;
 #: image/svg+xml is provably corrupted by XMLFormatter. Keep this private type.
 OUTPUT_MIME = "application/x-httpie-rich-terminal"
+
+#: Pillow embeds the repr of the stream it failed on, e.g.
+#: "cannot identify image file <_io.BytesIO object at 0x105...>". The heap
+#: address is noise in a user-facing line and differs on every run.
+_OBJECT_REPR = re.compile(r"\s*<[\w.]+ object at 0x[0-9a-fA-F]+>")
+
+
+def _clean_error(exc: Exception) -> str:
+    """Render an exception for the summary line, without volatile object reprs."""
+    return _OBJECT_REPR.sub("", str(exc)).strip() or type(exc).__name__
 
 
 class RichTerminalConverter(ConverterPlugin):
@@ -1964,11 +2096,18 @@ class RichTerminalConverter(ConverterPlugin):
             return False
         return supports_mime(mime)
 
-    def convert(self, body: bytes) -> Tuple[str, str]:
-        config = load_config()
-        # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
-        data = bytes(body)
+    def convert(self, body: bytes) -> tuple[str, str]:
+        # Everything lives inside the try, including the setup steps: this
+        # method is the last line of defence and must never raise toward
+        # HTTPie. Both seeds are chosen so the except branch still works if
+        # setup is what failed -- describe(b"") yields a dimensionless
+        # ImageInfo rather than raising.
+        config = None
+        data = b""
         try:
+            config = load_config()
+            # HTTPie hands us a bytearray; normalise so Pillow and slicing behave.
+            data = bytes(body)
             renderer = find_renderer(self.mime)
             if renderer is None:
                 return OUTPUT_MIME, self._summary(data, "无法渲染该类型")
@@ -1985,9 +2124,9 @@ class RichTerminalConverter(ConverterPlugin):
             )
             return OUTPUT_MIME, renderer(data, self.mime, detection, size, config)
         except Exception as exc:
-            if config.debug:
+            if config is not None and config.debug:
                 debug_log(config, "render failed:\n" + traceback.format_exc())
-            return OUTPUT_MIME, self._summary(data, f"渲染失败：{exc}")
+            return OUTPUT_MIME, self._summary(data, f"渲染失败：{_clean_error(exc)}")
 
     def _summary(self, data: bytes, reason: str) -> str:
         return format_summary(describe(data, self.mime), reason)
@@ -2112,7 +2251,7 @@ def test_end_to_end_convert_output_survives_the_chain(formatting, monkeypatch, p
 uv run pytest tests/test_httpie_pipeline.py -v
 ```
 
-Expected: 8 passed
+Expected: 7 passed（5 个测试函数，其中两个各带 2 组 parametrize：1+2+2+1+1）
 
 若 `test_svg_mime_would_corrupt_the_payload` 失败，说明 HTTPie 行为已变化，需重新核对设计文档 2.3 节，而不是删掉这个测试。
 
