@@ -1,13 +1,25 @@
 name: Release
 
 on:
+  # Tagging vX.Y.Z publishes to the real PyPI.
   push:
     tags: ["v*"]
+  # Manual runs default to TestPyPI, so the whole pipeline can be rehearsed
+  # without burning a version number -- PyPI never allows reusing one.
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Where to publish"
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
+    # Trusted Publishing matches on this name, so it must exist both as a
+    # GitHub environment and as the environment configured on the PyPI side.
+    environment: ${{ inputs.target || 'pypi' }}
     permissions:
       id-token: write
     steps:
@@ -20,5 +32,27 @@ jobs:
           uv run pytest -q
       - name: Build
         run: uv build
+      - name: Check the artifacts carry no internal files
+        run: |
+          uv run python - <<'PY'
+          import glob, sys, tarfile, zipfile
+          leaked = []
+          for path in glob.glob("dist/*.tar.gz"):
+              leaked += [f"{path}:{n}" for n in tarfile.open(path).getnames()
+                         if ".superpowers" in n or "/docs/" in n]
+          for path in glob.glob("dist/*.whl"):
+              leaked += [f"{path}:{n}" for n in zipfile.ZipFile(path).namelist()
+                         if ".superpowers" in n or "docs/" in n]
+          if leaked:
+              print("Internal files would be published:", *leaked, sep="\n  ")
+              sys.exit(1)
+          print("artifacts clean")
+          PY
+      - name: Publish to TestPyPI
+        if: inputs.target == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
       - name: Publish to PyPI
+        if: inputs.target != 'testpypi'
         uses: pypa/gh-action-pypi-publish@release/v1
