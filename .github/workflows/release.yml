@@ -25,6 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          # This project deliberately does not commit uv.lock, so key the cache
+          # on the dependency declaration instead of the (absent) lockfile.
+          cache-dependency-glob: "pyproject.toml"
       - name: Test
         run: |
           uv sync

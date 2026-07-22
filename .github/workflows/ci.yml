@@ -17,6 +17,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          # This project deliberately does not commit uv.lock, so key the cache
+          # on the dependency declaration instead of the (absent) lockfile.
+          cache-dependency-glob: "pyproject.toml"
       - name: Install
         run: uv sync --python ${{ matrix.python-version }}
       - name: Lint
