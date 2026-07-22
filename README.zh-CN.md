@@ -1,4 +1,4 @@
-[English](README.md) | [简体中文](README.zh-CN.md)
+[English](https://github.com/moonfruit/httpie-rich-terminal/blob/main/README.md) | [简体中文](https://github.com/moonfruit/httpie-rich-terminal/blob/main/README.zh-CN.md)
 
 [![PyPI](https://img.shields.io/pypi/v/httpie-rich-terminal)](https://pypi.org/project/httpie-rich-terminal/)
 [![CI](https://github.com/moonfruit/httpie-rich-terminal/actions/workflows/ci.yml/badge.svg)](https://github.com/moonfruit/httpie-rich-terminal/actions/workflows/ci.yml)
